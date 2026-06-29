@@ -116,22 +116,28 @@ def _repair_format(s: str):
     return None
 
 
-def _reconcile_year(d: date, block_year):
+def _reconcile_year(d: date, block_year, block_month):
     """
-    Etapa 3: o ano de um fechamento tem que ser o ano do bloco do mês onde a
-    linha está arquivada. Se divergir, sobrescreve SÓ o ano (mantém dia+mês).
-    Cobre tanto ano-lixo (0206, 2023) quanto ano dentro da janela mas do bloco
-    errado (2025 num bloco de 2026) — ver fixtures §8.
+    Etapa 3: corrige o ano SÓ quando é seguro:
+      - typo dentro do mesmo mês do bloco (mês da linha == mês do bloco), ou
+      - ano impossível (< 2025).
+    Se o mês difere do bloco e o ano é plausível, é fechamento lançado na aba de
+    um mês vizinho (ex.: 30/12/2025 na aba JANEIRO 2026) — confia na data inteira
+    e NÃO sobrescreve o ano (senão erraria o vira-ano Dez/Jan).
+    Mantém sempre dia+mês. Cobre ano-lixo (0206, 2023) e typo de ano no mesmo
+    bloco (2025 num bloco de 2026) — ver fixtures §8.
     """
     if not block_year or d.year == block_year:
         return d
-    try:
-        return d.replace(year=block_year)
-    except ValueError:  # 29/02 em ano não-bissexto
-        return d.replace(year=block_year, day=28)
+    if d.month == block_month or d.year < 2025:
+        try:
+            return d.replace(year=block_year)
+        except ValueError:  # 29/02 em ano não-bissexto
+            return d.replace(year=block_year, day=28)
+    return d
 
 
-def analyze_date(value, block_year):
+def analyze_date(value, block_year, block_month=None):
     """
     Aplica o repair (§8) e devolve (date|None, status).
     status ∈ {'parsed','reconciled','reformatted','sd'} — para o relatório do
@@ -142,7 +148,7 @@ def analyze_date(value, block_year):
     if isinstance(value, datetime):
         value = value.date()
     if isinstance(value, date):
-        d2 = _reconcile_year(value, block_year)
+        d2 = _reconcile_year(value, block_year, block_month)
         return d2, ("reconciled" if d2 != value else "parsed")
 
     s = str(value).strip()
@@ -157,7 +163,7 @@ def analyze_date(value, block_year):
     if d is None:
         return None, "sd"
 
-    d2 = _reconcile_year(d, block_year)
+    d2 = _reconcile_year(d, block_year, block_month)
     if d2 != d and status == "parsed":
         status = "reconciled"
     return d2, status
@@ -165,7 +171,7 @@ def analyze_date(value, block_year):
 
 def repair_date(value, block_year, block_month=None):
     """Conveniência: só a data reparada (ou None)."""
-    d, _ = analyze_date(value, block_year)
+    d, _ = analyze_date(value, block_year, block_month)
     return d
 
 
@@ -239,7 +245,7 @@ def transform_row(cells, closer, nicho, block_month, block_year, now_str):
         return None
     nome = str(name_raw).strip()
 
-    d, status = analyze_date(get(4), block_year)
+    d, status = analyze_date(get(4), block_year, block_month)
     if d is not None:
         tgt_month, tgt_year = d.month, d.year
     else:

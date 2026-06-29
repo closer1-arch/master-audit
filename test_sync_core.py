@@ -16,38 +16,53 @@ import sync_core as c
 # --------------------------------------------------------------------------- #
 # §8 — Repair de data: fixtures obrigatórios.
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("raw, block_year, expected", [
-    ("09/042026", 2026, date(2026, 4, 9)),    # barra faltando
-    ("14/012026", 2026, date(2026, 1, 14)),
-    ("19/052026", 2026, date(2026, 5, 19)),
-    ("25/5/0206", 2026, date(2026, 5, 25)),   # ano lixo -> ano do bloco
-    ("14/1/2025", 2026, date(2026, 1, 14)),   # bloco Jan -> 2026
-    ("9/3/2023",  2026, date(2026, 3, 9)),    # bloco Mar -> 2026
-    ("20/05/2025", 2026, date(2026, 5, 20)),  # bloco Mai -> 2026
-    ("6/10/2025", 2025, date(2025, 10, 6)),   # bloco Out -> 2025 (sem override)
+@pytest.mark.parametrize("raw, block_year, block_month, expected", [
+    ("09/042026", 2026, 4, date(2026, 4, 9)),    # barra faltando
+    ("14/012026", 2026, 1, date(2026, 1, 14)),
+    ("19/052026", 2026, 5, date(2026, 5, 19)),
+    ("25/5/0206", 2026, 5, date(2026, 5, 25)),   # ano lixo -> ano do bloco
+    ("14/1/2025", 2026, 1, date(2026, 1, 14)),   # typo mesmo mês -> 2026
+    ("9/3/2023",  2026, 3, date(2026, 3, 9)),    # ano impossível -> 2026
+    ("20/05/2025", 2026, 5, date(2026, 5, 20)),  # typo mesmo mês -> 2026
+    ("6/10/2025", 2025, 10, date(2025, 10, 6)),  # bloco Out -> 2025 (sem override)
 ])
-def test_repair_date_fixtures(raw, block_year, expected):
-    assert c.repair_date(raw, block_year) == expected
+def test_repair_date_fixtures(raw, block_year, block_month, expected):
+    assert c.repair_date(raw, block_year, block_month) == expected
 
 
 def test_repair_date_irrecuperavel():
-    assert c.repair_date("#######", 2026) is None
-    assert c.repair_date("", 2026) is None
-    assert c.repair_date(None, 2026) is None
+    assert c.repair_date("#######", 2026, 6) is None
+    assert c.repair_date("", 2026, 6) is None
+    assert c.repair_date(None, 2026, 6) is None
 
 
 def test_repair_date_iso_e_datetime():
-    assert c.repair_date("2026-04-09", 2026) == date(2026, 4, 9)
-    assert c.repair_date(datetime(2026, 4, 9, 13, 0), 2026) == date(2026, 4, 9)
-    # datetime com ano do bloco errado também é reconciliado
-    assert c.repair_date(datetime(2025, 5, 20), 2026) == date(2026, 5, 20)
+    assert c.repair_date("2026-04-09", 2026, 4) == date(2026, 4, 9)
+    assert c.repair_date(datetime(2026, 4, 9, 13, 0), 2026, 4) == date(2026, 4, 9)
+    # datetime com typo de ano no MESMO mês do bloco é reconciliado
+    assert c.repair_date(datetime(2025, 5, 20), 2026, 5) == date(2026, 5, 20)
+
+
+def test_reconcile_cross_mes_nao_sobrescreve_ano():
+    # FURO: fechamento real 30/12/2025 lançado na aba JANEIRO 2026.
+    # Mês difere do bloco e ano é plausível -> confia na data, NÃO reconcilia.
+    assert c.analyze_date(date(2025, 12, 30), 2026, 1)[0] == date(2025, 12, 30)
+    assert c.repair_date("30/12/2025", 2026, 1) == date(2025, 12, 30)
+    # typo no mesmo mês do bloco: reconcilia.
+    assert c.analyze_date("14/1/2025", 2026, 1)[0] == date(2026, 1, 14)
+    # ano impossível (< 2025): reconcilia mesmo com mês divergente.
+    assert c.analyze_date("9/3/2023", 2026, 3)[0] == date(2026, 3, 9)
+    # data limpa do próprio bloco: intacta.
+    assert c.analyze_date("6/10/2025", 2025, 10)[0] == date(2025, 10, 6)
+    # ano lixo, mesmo mês: reconcilia.
+    assert c.analyze_date("25/5/0206", 2026, 5)[0] == date(2026, 5, 25)
 
 
 def test_analyze_date_status():
-    assert c.analyze_date("09/04/2026", 2026)[1] == "parsed"
-    assert c.analyze_date("09/042026", 2026)[1] == "reformatted"
-    assert c.analyze_date("20/05/2025", 2026)[1] == "reconciled"
-    assert c.analyze_date("#######", 2026) == (None, "sd")
+    assert c.analyze_date("09/04/2026", 2026, 4)[1] == "parsed"
+    assert c.analyze_date("09/042026", 2026, 4)[1] == "reformatted"
+    assert c.analyze_date("20/05/2025", 2026, 5)[1] == "reconciled"
+    assert c.analyze_date("#######", 2026, 5) == (None, "sd")
 
 
 # --------------------------------------------------------------------------- #
