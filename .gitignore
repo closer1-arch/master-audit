@@ -1,0 +1,14 @@
+# Credenciais / segredos — NUNCA commitar
+*.json
+.env
+.env.*
+credentials*
+sa.json
+auto-master.json
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
