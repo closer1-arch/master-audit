@@ -113,6 +113,14 @@ def test_build_observacoes():
     ("Modelo de planilha", True),
     ("João da Silva", False),
     ("Ana Paula", False),
+    # Subtítulos de bloco (mês + ano 20xx) -> pular.
+    ("Março - 2026", True),
+    ("MAIO-2026 FECHAMENTOS - 05/2026 - CATARINA", True),
+    ("JANEIRO - 2026", True),
+    # Clientes reais -> não pular.
+    ("Claudia Luana Leite de Souza", False),   # sem ano; col4 corrompida vira sem-data
+    ("José Maria dos Santos", False),
+    ("Abril Santos", False),                    # mês sem ano não pula
 ])
 def test_should_skip_row(name, skip):
     assert c.should_skip_row(name) is skip

@@ -199,13 +199,22 @@ def build_observacoes(col6, col10) -> str:
 
 
 _SKIP_RE = re.compile(r"^(fechamentos|nome|total|modelo)", re.IGNORECASE)
+_YEAR_RE = re.compile(r"20\d{2}")
 
 
 def should_skip_row(name) -> bool:
     t = "" if name is None else str(name).strip()
     if not t:
         return True
-    return bool(_SKIP_RE.match(t))
+    if _SKIP_RE.match(t):
+        return True
+    # Subtítulo de bloco (ex.: "Março - 2026"): contém MÊS + ANO 20xx.
+    # Nunca é cliente real. (Cliente sem ano no nome, mesmo com col4
+    # corrompida, NÃO cai aqui — vira sem-data e é processado.)
+    up = t.upper()
+    if _YEAR_RE.search(up) and any(m in up for m in MONTHS_PT):
+        return True
+    return False
 
 
 def master_tab_name(month: int, year: int) -> str:
