@@ -97,24 +97,24 @@ python sync_master.py --mode ativo --apply
 | Var | Obrigatória | Descrição |
 |---|---|---|
 | `ALF_SYNC_SA_JSON` | sim | **Conteúdo JSON** da service account (não caminho, no Railway). |
-| `ALF_SYNC_SMTP_USER` | p/ e-mail | Usuário SMTP Gmail (remetente). |
-| `ALF_SYNC_SMTP_PASS` | p/ e-mail | **Senha de app** do Gmail (não a senha da conta). |
-| `ALF_SYNC_MAIL_TO` | p/ e-mail | Destinatário(s) do relatório (vírgula separa vários). |
+| `ALF_SYNC_TG_TOKEN` | p/ notificação | Token do bot do Telegram (BotFather). |
+| `ALF_SYNC_TG_CHAT` | p/ notificação | Chat ID de destino (pessoa, grupo ou canal). |
 | `ALF_SYNC_MAX_INSERTS` | não | Teto do guard de insert (default **60**). |
 
 **Guard de insert:** se um run `--apply` fosse inserir mais que `ALF_SYNC_MAX_INSERTS`
 linhas, ele **aborta antes de escrever qualquer coisa** (nem update nem insert),
-dispara e-mail `🚨 ... ABORTADO` e sai com código 1. Protege contra origem
+dispara a notificação `🚨 ... ABORTADO` e sai com código 1. Protege contra origem
 corrompida/duplicada gerando avalanche de inserts.
 
-**E-mail (só em `--apply`):** sucesso → `✅ Sync master OK` com o resumo; abort →
-`🚨 ... ABORTADO`; exceção não tratada → `🚨 ... FALHOU` com o traceback. Envio é
-best-effort (falha de SMTP não derruba o run). Dry-run **não** notifica.
+**Notificação Telegram (só em `--apply`):** sucesso → `✅ Sync master OK` com o
+resumo; abort → `🚨 ... ABORTADO`; exceção não tratada → `🚨 ... FALHOU` com o
+traceback. Envio é best-effort (falha de rede não derruba o run) e corpos longos
+são truncados em ~4000 chars. Dry-run **não** notifica.
 
-Validar a credencial SMTP no Railway sem rodar o sync:
+Validar o canal Telegram no Railway sem rodar o sync:
 
 ```
-python sync_master.py --test-email
+python sync_master.py --test-notify
 ```
 
 ## Testes

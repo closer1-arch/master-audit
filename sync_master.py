@@ -115,9 +115,13 @@ def get_services(sa_value):
 
 
 # --------------------------------------------------------------------------- #
-# Notificação por e-mail (SMTP Gmail, STARTTLS). Best-effort: falha de SMTP não
-# derruba o run. Só runs --apply notificam; dry-run não.
+# Notificação por Telegram (Bot API). Best-effort: falha de rede não derruba o
+# run. Só runs --apply notificam; dry-run não. Mantém o nome notify_email e a
+# assinatura (subject, body) para não mexer nos call sites.
 # --------------------------------------------------------------------------- #
+TG_MAX_TEXT = 4000  # Telegram corta em 4096; folga de segurança.
+
+
 def subject_ok(when):
     return f"✅ Sync master OK — {when} BRT"
 
@@ -130,32 +134,35 @@ def subject_fail(when):
     return f"🚨 Sync master FALHOU — {when}"
 
 
-def notify_email(subject, body):
-    """Envia e-mail via smtp.gmail.com:587. Devolve True/False; nunca levanta."""
-    user = os.environ.get("ALF_SYNC_SMTP_USER")
-    pw = os.environ.get("ALF_SYNC_SMTP_PASS")
-    to = os.environ.get("ALF_SYNC_MAIL_TO")
-    if not (user and pw and to):
-        print("notify_email: credenciais SMTP ausentes "
-              "(ALF_SYNC_SMTP_USER/PASS/MAIL_TO); e-mail não enviado.")
-        return False
-    import smtplib
-    from email.message import EmailMessage
+def _tg_text(subject, body):
+    """Monta o texto; trunca preservando o subject se passar do limite."""
+    text = subject + "\n\n" + body
+    if len(text) > TG_MAX_TEXT:
+        suffix = "\n…(truncado)"
+        text = text[:TG_MAX_TEXT - len(suffix)] + suffix
+    return text
 
-    msg = EmailMessage()
-    msg["From"] = user
-    msg["To"] = to
-    msg["Subject"] = subject
-    msg.set_content(body)
+
+def notify_email(subject, body):
+    """Envia notificação via Telegram Bot API. Devolve True/False; nunca levanta."""
+    token = os.environ.get("ALF_SYNC_TG_TOKEN")
+    chat = os.environ.get("ALF_SYNC_TG_CHAT")
+    if not (token and chat):
+        print("notify: TG_TOKEN/TG_CHAT ausentes; não enviado")
+        return False
+
+    import urllib.request
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = json.dumps({"chat_id": chat, "text": _tg_text(subject, body)}).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as s:
-            s.starttls()
-            s.login(user, pw)
-            s.send_message(msg)
-        print(f"E-mail enviado: {subject}")
+        urllib.request.urlopen(req, timeout=30).close()
+        print("Notif enviada")
         return True
     except Exception as e:  # best-effort: reporta, não engole o resultado do run
-        print(f"notify_email: falha no SMTP ({e}); run não afetado.")
+        print(f"notify: falha ({e}); run não afetado")
         return False
 
 
@@ -297,7 +304,7 @@ def apply_inserts(sheets, master_id, inserts, props, tab_lastrow):
 
 
 # --------------------------------------------------------------------------- #
-# Relatório (dry-run e pós-run). Devolve o texto (reusado no corpo do e-mail).
+# Relatório (dry-run e pós-run). Devolve o texto (reusado no corpo da notificação).
 # --------------------------------------------------------------------------- #
 def format_report(all_rows, inserts, updates, props, source_stats):
     out = []
@@ -403,7 +410,7 @@ def _run(args):
 
 
 # --------------------------------------------------------------------------- #
-# Main: argparse + --test-email + try/except que notifica falha (só em --apply).
+# Main: argparse + --test-notify + try/except que notifica falha (só em --apply).
 # --------------------------------------------------------------------------- #
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Sync/Backfill da Master de Auditoria Comercial.")
@@ -418,13 +425,14 @@ def main(argv=None):
     ap.add_argument("--only", action="append", default=[],
                     help="Filtra por closer (pode repetir). Ex.: --only 'Raul Gabriel'.")
     ap.add_argument("--master-id", default=MASTER_ID, help="Override do fileId da master.")
-    ap.add_argument("--test-email", action="store_true",
-                    help="Manda um e-mail de teste e sai (valida SMTP no Railway).")
+    ap.add_argument("--test-email", "--test-notify", dest="test_email",
+                    action="store_true",
+                    help="Manda uma notificação de teste e sai (valida o Telegram no Railway).")
     args = ap.parse_args(argv)
 
     if args.test_email:
-        ok = notify_email("✅ Sync master — e-mail de teste",
-                          f"Teste de credencial SMTP do cron ({now_brt()} BRT). "
+        ok = notify_email("✅ Sync master — teste de notificação",
+                          f"Teste do canal Telegram do cron ({now_brt()} BRT). "
                           "Se você recebeu isto, o envio funciona.")
         sys.exit(0 if ok else 1)
 

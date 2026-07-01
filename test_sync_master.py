@@ -1,8 +1,9 @@
 """
-Testes da camada de cron/notificação (sync_master), sem rede e sem e-mail real.
+Testes da camada de cron/notificação (sync_master), sem rede e sem envio real.
 
 Cobrem: loader da SA (caminho E conteúdo JSON), guard de insert (>max), assuntos
-de e-mail por desfecho, notify_email com smtplib mockado, e o filtro --mode ativo.
+por desfecho, notify_email via Telegram com urllib mockado (payload/env/rede/
+truncagem), e o filtro --mode ativo.
 """
 
 import json
@@ -58,41 +59,57 @@ def test_subjects():
 
 
 # --------------------------------------------------------------------------- #
-# notify_email: monta o assunto certo e envia via SMTP mockado.
+# notify_email (Telegram): monta chat_id+text e faz POST via urllib mockado.
 # --------------------------------------------------------------------------- #
-def _set_smtp_env(monkeypatch):
-    monkeypatch.setenv("ALF_SYNC_SMTP_USER", "bot@lilianfoganholiadv.com.br")
-    monkeypatch.setenv("ALF_SYNC_SMTP_PASS", "app-password")
-    monkeypatch.setenv("ALF_SYNC_MAIL_TO", "raul@lilianfoganholiadv.com.br")
+def _set_tg_env(monkeypatch):
+    monkeypatch.setenv("ALF_SYNC_TG_TOKEN", "123456:ABC-token")
+    monkeypatch.setenv("ALF_SYNC_TG_CHAT", "-1009876543210")
 
 
-def test_notify_email_envia_com_assunto(monkeypatch):
-    _set_smtp_env(monkeypatch)
-    with mock.patch("smtplib.SMTP") as SMTP:
-        inst = SMTP.return_value.__enter__.return_value
+def _posted(urlopen_mock):
+    """Extrai (url, payload_dict) do Request passado ao urlopen mockado."""
+    req = urlopen_mock.call_args[0][0]
+    return req.full_url, json.loads(req.data.decode("utf-8"))
+
+
+def test_notify_envia_payload_correto(monkeypatch):
+    _set_tg_env(monkeypatch)
+    with mock.patch("urllib.request.urlopen") as urlopen:
         ok = sm.notify_email(sm.subject_abort(85, 60), "corpo do alerta")
     assert ok is True
-    inst.starttls.assert_called_once()
-    inst.login.assert_called_once_with("bot@lilianfoganholiadv.com.br", "app-password")
-    sent_msg = inst.send_message.call_args[0][0]
-    assert sent_msg["Subject"] == "🚨 Sync master ABORTADO — inserts=85 > teto 60"
-    assert sent_msg["To"] == "raul@lilianfoganholiadv.com.br"
+    url, payload = _posted(urlopen)
+    assert url == "https://api.telegram.org/bot123456:ABC-token/sendMessage"
+    assert payload["chat_id"] == "-1009876543210"
+    assert payload["text"] == "🚨 Sync master ABORTADO — inserts=85 > teto 60\n\ncorpo do alerta"
 
 
-def test_notify_email_sem_credencial_nao_envia(monkeypatch):
-    for v in ("ALF_SYNC_SMTP_USER", "ALF_SYNC_SMTP_PASS", "ALF_SYNC_MAIL_TO"):
+def test_notify_sem_credencial_nao_envia(monkeypatch):
+    for v in ("ALF_SYNC_TG_TOKEN", "ALF_SYNC_TG_CHAT"):
         monkeypatch.delenv(v, raising=False)
-    with mock.patch("smtplib.SMTP") as SMTP:
+    with mock.patch("urllib.request.urlopen") as urlopen:
         ok = sm.notify_email("assunto", "corpo")
     assert ok is False
-    SMTP.assert_not_called()
+    urlopen.assert_not_called()
 
 
-def test_notify_email_smtp_falha_best_effort(monkeypatch):
-    _set_smtp_env(monkeypatch)
-    with mock.patch("smtplib.SMTP", side_effect=OSError("sem rede")):
+def test_notify_rede_falha_best_effort(monkeypatch):
+    _set_tg_env(monkeypatch)
+    with mock.patch("urllib.request.urlopen", side_effect=OSError("sem rede")):
         ok = sm.notify_email("assunto", "corpo")   # não pode levantar
     assert ok is False
+
+
+def test_notify_trunca_corpo_longo(monkeypatch):
+    _set_tg_env(monkeypatch)
+    big = "x" * 9000
+    with mock.patch("urllib.request.urlopen") as urlopen:
+        ok = sm.notify_email("ASSUNTO", big)
+    assert ok is True
+    _, payload = _posted(urlopen)
+    text = payload["text"]
+    assert len(text) <= sm.TG_MAX_TEXT
+    assert text.startswith("ASSUNTO")
+    assert text.endswith("…(truncado)")
 
 
 # --------------------------------------------------------------------------- #
