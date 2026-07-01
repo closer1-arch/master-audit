@@ -36,11 +36,14 @@ pip install -r requirements.txt
 
 A SA precisa de **leitura nas fontes** (Drive) e **edição na master** (Sheets).
 Compartilhe a master e as 5 fontes com o e-mail da SA. **A credencial nunca vai
-para o vault, log ou chat.** Informe o caminho do JSON por:
+para o vault, log ou chat.** O valor de `ALF_SYNC_SA_JSON` pode ser um **caminho
+de arquivo** (dev local) OU o **conteúdo JSON** inteiro (Railway, que só tem env
+string) — a mesma variável serve nos dois casos:
 
 ```powershell
-$env:ALF_SYNC_SA_JSON = "C:\caminho\fora-do-vault\sa.json"
+$env:ALF_SYNC_SA_JSON = "C:\caminho\fora-do-vault\sa.json"   # caminho (local)
 # ou passe --sa "C:\caminho\sa.json" em cada execução
+# no Railway: cole o conteúdo do JSON inteiro na env var (não um caminho)
 ```
 
 ## Execução (2 passos — §13)
@@ -67,7 +70,52 @@ python sync_master.py --only "Raul Gabriel"    # uma fonte específica
 ```
 
 Como o upsert é **idempotente** (dedup por `Chave`), re-rodar o backfill não
-duplica. O sync contínuo futuro roda só `--mode ativo`.
+duplica. O sync contínuo roda só `--mode ativo` (exclui Raul/Catarina, backfill
+one-time já aplicado).
+
+## Deploy Railway (cron 2x/dia)
+
+O cron roda o sync contínuo dos 3 closers ativos, com guard de segurança e
+notificação por e-mail a cada execução.
+
+**Start command:**
+
+```
+python sync_master.py --mode ativo --apply
+```
+
+**Schedule (cron do Railway, em UTC):**
+
+```
+0 16,22 * * *
+```
+
+= **13h e 19h BRT** (UTC−3). Duas passadas por dia.
+
+**Variáveis de ambiente:**
+
+| Var | Obrigatória | Descrição |
+|---|---|---|
+| `ALF_SYNC_SA_JSON` | sim | **Conteúdo JSON** da service account (não caminho, no Railway). |
+| `ALF_SYNC_SMTP_USER` | p/ e-mail | Usuário SMTP Gmail (remetente). |
+| `ALF_SYNC_SMTP_PASS` | p/ e-mail | **Senha de app** do Gmail (não a senha da conta). |
+| `ALF_SYNC_MAIL_TO` | p/ e-mail | Destinatário(s) do relatório (vírgula separa vários). |
+| `ALF_SYNC_MAX_INSERTS` | não | Teto do guard de insert (default **60**). |
+
+**Guard de insert:** se um run `--apply` fosse inserir mais que `ALF_SYNC_MAX_INSERTS`
+linhas, ele **aborta antes de escrever qualquer coisa** (nem update nem insert),
+dispara e-mail `🚨 ... ABORTADO` e sai com código 1. Protege contra origem
+corrompida/duplicada gerando avalanche de inserts.
+
+**E-mail (só em `--apply`):** sucesso → `✅ Sync master OK` com o resumo; abort →
+`🚨 ... ABORTADO`; exceção não tratada → `🚨 ... FALHOU` com o traceback. Envio é
+best-effort (falha de SMTP não derruba o run). Dry-run **não** notifica.
+
+Validar a credencial SMTP no Railway sem rodar o sync:
+
+```
+python sync_master.py --test-email
+```
 
 ## Testes
 
@@ -84,4 +132,3 @@ python -m pytest -q
   aplicar.
 - **Artefato herdado** (spec §12): há 1 linha em junho/Beatriz com Nome ≠ Chave.
   O script **não conserta** linha existente — apenas registra. Correção manual à parte.
-- **Agendamento** (cron Railway / Routine) é camada separada, fora deste script.
